@@ -1,18 +1,18 @@
 import feedparser
-from curl_cffi.requests import AsyncSession
 import re
 import hashlib
+import random
+from curl_cffi.requests import AsyncSession
 from bs4 import BeautifulSoup
 from utils.logger import log
 
 class RSSParser:
     # Simulamos un navegador real (Chrome 110+)
-    IMPERSONATE = "chrome120"
-    
+    PROFILES = ["chrome120", "chrome110"]
     HEADERS = {
         "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
         "Accept-Language": "es-ES,es;q=0.9,en;q=0.8",
-        "Referer": "https://www.google.com/",
+        "Referer": "https://www.google.com/", # Referer de confianza ayuda a evitar bloqueos
         "Upgrade-Insecure-Requests": "1"
     }
 
@@ -64,13 +64,32 @@ class RSSParser:
 
     @classmethod
     async def fetch_content(cls, url):
-        """Método robusto de obtención de contenido usando curl_cffi"""
+        """Método robusto con rotación de huellas digitales."""
+        # Seleccionamos un perfil aleatorio inicial
+        current_profile = random.choice(cls.PROFILES)
+        
         try:
-            async with AsyncSession(impersonate=cls.IMPERSONATE, headers=cls.HEADERS) as session:
+            async with AsyncSession(impersonate=current_profile, headers=cls.HEADERS) as session:
                 response = await session.get(url, timeout=30)
+                
+                # Si recibimos 403 (Forbidden) o 503 (Service Unavailable - común en Cloudflare)
+                if response.status_code in [403, 503, 429]:
+                    log(f"🛡️ Bloqueo detectado ({response.status_code}) con {current_profile}. Rotando identidad...", "warning")
+                    
+                    # Intentamos con un perfil específico de Safari (suelen tener mejor paso en CF)
+                    fallback_profile = "safari_15_3" if current_profile != "safari_15_3" else "chrome110"
+                    
+                    async with AsyncSession(impersonate=fallback_profile, headers=cls.HEADERS) as s2:
+                        resp2 = await s2.get(url, timeout=30)
+                        if resp2.status_code == 200:
+                            return resp2.content, None
+                        return None, f"Bloqueo persistente (HTTP {resp2.status_code})"
+
                 if response.status_code not in [200, 301, 302]:
-                    return None, f"HTTP {response.status_code}"
-                return response.content, None # Retorna bytes
+                     return None, f"HTTP {response.status_code}"
+                
+                return response.content, None
+
         except Exception as e:
             return None, str(e)
 

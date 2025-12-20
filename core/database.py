@@ -191,3 +191,13 @@ class DB:
                 await cls.save()
                 return True
         return False
+    
+    @classmethod
+    async def update_feed_url(cls, user_id, feed_id, new_url):
+        data = await cls.get_user(user_id)
+        for feed in data['feeds']:
+            if feed['id'] == feed_id:
+                feed['url'] = new_url
+                await cls.save()
+                return True
+        return False

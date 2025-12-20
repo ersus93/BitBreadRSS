@@ -1,4 +1,5 @@
 import asyncio
+import json
 import urllib.parse
 from urllib.parse import urljoin, urlparse
 from bs4 import BeautifulSoup
@@ -96,6 +97,36 @@ class RSSResolver:
             elif "403" in str(c_err) or "429" in str(c_err):
                 log(f"   🚫 Bloqueo WAF en {cand}", "warning")
 
+        # --- NUEVO BLOQUE: Consulta Externa ---
+        # Si falló todo lo local (o hubo bloqueo masivo), preguntamos a Feedly
+        log("⚠️ Falló descubrimiento local. Activando Nivel 2 (API Externa)...")
+        ext_url, ext_title, ext_err = await cls.fetch_from_feedly(url)
+        if ext_url:
+             return ext_url, ext_title, None
+        # --------------------------------------
+
         # 4. Fallback Final (Si todo falla)
         fail_msg = f"No se pudo detectar el feed. Error inicial: {domain_error}" if domain_error else "No se encontraron feeds válidos."
         return None, None, fail_msg
+    
+    @classmethod
+    async def fetch_from_feedly(cls, domain_url):
+        """Consulta la API pública de Feedly para descubrir feeds si el acceso local falla."""
+        # (Asegúrate que esta línea esté alineada con las comillas de arriba)
+        clean_url = urllib.parse.quote(domain_url)
+        search_url = f"https://cloud.feedly.com/v3/search/feeds?query={clean_url}"
+
+        log(f"🌍 Consultando inteligencia externa (Feedly) para: {domain_url}")
+        content, err = await RSSParser.fetch_content(search_url)
+
+        if not err and content:
+            try:
+                data = json.loads(content)
+                if data.get('results'):
+                    # Feedly devuelve 'feed/http...', limpiamos el prefijo
+                    best_match = data['results'][0]
+                    found_url = best_match['feedId'].replace('feed/', '')
+                    return found_url, best_match.get('title', 'Feed Externo'), None
+            except Exception as e:
+                log(f"Error parseando respuesta de Feedly: {e}", "warning")
+        return None, None, "No encontrado en índices externos"
