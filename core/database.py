@@ -70,26 +70,48 @@ class DB:
 
     @classmethod
     async def add_channel(cls, user_id, cid, title):
-        data = await cls.get_user(user_id)
+        """
+        Añade un canal verificando primero que NO exista en NINGÚN usuario.
+        """
+        await cls.load() # Asegurar carga
         try:
             cid = int(cid)
         except:
             pass
             
-        if any(c['id'] == cid for c in data['channels']):
-            return False
-        data['channels'].append({"id": cid, "title": title})
-        await cls.save()
-        return True
+        # 1. Validación Global: Recorremos todos los usuarios para ver si el canal ya existe
+        for uid, udata in cls._data.items():
+            for ch in udata.get('channels', []):
+                if ch['id'] == cid:
+                    # Si el canal ya existe, verificamos si es del mismo usuario o de otro
+                    return "exist_global" # Código interno para indicar duplicado global
 
+        # 2. Si no existe, lo añadimos al usuario actual
+        user_data = await cls.get_user(user_id)
+        user_data['channels'].append({"id": cid, "title": title})
+        await cls.save()
+        return "success"
+
+   
     @classmethod
-    async def add_feed(cls, user_id, url, channel_id, source_title, last_hash):
+    async def add_feed(cls, user_id, original_url, resolved_url, channel_id, source_title, last_hash):
+        """
+        Añade un feed guardando tanto la URL original como la resuelta (XML).
+        """
         data = await cls.get_user(user_id)
+        
+        # Validación de duplicados usando la URL RESUELTA (limpia)
+        clean_resolved = resolved_url.strip()
+        for f in data['feeds']:
+            if f.get('url', '').strip() == clean_resolved:
+                return None 
+        
         feed_id = str(uuid.uuid4())[:8]
         
         new_feed = {
             "id": feed_id,
-            "url": url,
+            "url": clean_resolved,        # La URL técnica (XML) que usa el Monitor
+            "original_url": original_url, # La URL que ingresó el usuario
             "channel_id": channel_id,
             "title": source_title,
             "active": True,
@@ -104,6 +126,26 @@ class DB:
         data['feeds'].append(new_feed)
         await cls.save()
         return new_feed
+    
+    @classmethod
+    async def update_feed_channel(cls, user_id, feed_id, new_channel_id):
+        """
+        Actualiza el ID del canal de destino para un feed específico.
+        """
+        data = await cls.get_user(user_id)
+        new_channel_id = int(new_channel_id)
+        
+        # Verificamos que el canal exista en la lista del usuario (seguridad)
+        channel_exists = any(c['id'] == new_channel_id for c in data['channels'])
+        if not channel_exists:
+            return False
+
+        for feed in data['feeds']:
+            if feed['id'] == feed_id:
+                feed['channel_id'] = new_channel_id
+                await cls.save()
+                return True
+        return False
     
     @classmethod
     async def delete_feed(cls, user_id, feed_id):

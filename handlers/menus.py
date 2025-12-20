@@ -100,6 +100,14 @@ async def show_feed_options(update: Update, context: ContextTypes.DEFAULT_TYPE, 
         if update.callback_query:
             await update.callback_query.edit_message_text(error_txt, parse_mode=ParseMode.MARKDOWN)
         return
+    
+    # Buscar nombre del canal actual para mostrarlo
+    current_ch_id = feed.get('channel_id')
+    channel_name = "Desconocido/Eliminado"
+    for c in data['channels']:
+        if c['id'] == current_ch_id:
+            channel_name = c['title']
+            break
 
     title_safe = html.escape(feed.get('title', 'Sin Título'))
     url_safe = html.escape(feed.get('url', '...'))
@@ -109,12 +117,14 @@ async def show_feed_options(update: Update, context: ContextTypes.DEFAULT_TYPE, 
     txt = (
         f"⚙️ <b>Configuración de Feed</b>\n\n"
         f"📰 <b>Nombre:</b> {title_safe}\n"
-        f"🔗 <b>URL:</b> {url_safe}\n"
         f"🎨 <b>Estilo:</b> {style_label}\n"
         f"⏱ <b>Frecuencia:</b> Cada {interval} min\n"
+        f"📢 <b>Destino:</b> {html.escape(channel_name)}\n"
+        f"🔗 <b>URL:</b> {url_safe}\n"
     )
 
     kb = [
+        [InlineKeyboardButton("📢 Cambiar Destino", callback_data=f"move_feed_{feed_id}")], # NUEVO BOTÓN
         [InlineKeyboardButton("🎨 Cambiar Estilo", callback_data=f"toggle_style_{feed_id}")],
         [InlineKeyboardButton("⏱ Frecuencia", callback_data=f"menu_time_{feed_id}")],
         [InlineKeyboardButton("📝 Editar Plantilla", callback_data=f"tmpl_feed_{feed_id}")],
@@ -190,6 +200,39 @@ async def menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         fid = data.split("_")[2]
         await show_feed_options(update, context, fid)
 
+    # === NUEVA LÓGICA: CAMBIAR DESTINO ===
+    if data.startswith("move_feed_"):
+        fid = data.split("_")[2]
+        user_data = await DB.get_user(user_id)
+        
+        if not user_data['channels']:
+            await query.answer("⚠️ No tienes canales. Añade uno primero.", show_alert=True)
+            return
+
+        kb = []
+        for ch in user_data['channels']:
+            # Callback format: set_dest_FEEDID_CHANNELID
+            kb.append([InlineKeyboardButton(f"📢 {ch['title']}", callback_data=f"set_dest_{fid}_{ch['id']}")])
+        
+        kb.append([InlineKeyboardButton("🔙 Cancelar", callback_data=f"feed_opt_{fid}")])
+        
+        await query.edit_message_text(
+            "📍 *Selecciona el nuevo canal de destino:*",
+            reply_markup=InlineKeyboardMarkup(kb),
+            parse_mode=ParseMode.MARKDOWN
+        )
+
+    elif data.startswith("set_dest_"):
+        parts = data.split("_")
+        fid = parts[2]
+        new_cid = parts[3]
+        
+        if await DB.update_feed_channel(user_id, fid, new_cid):
+            # Volvemos al menú del feed para confirmar visualmente
+            await show_feed_options(update, context, fid)
+        else:
+            await query.answer("❌ Error cambiando el canal.", show_alert=True)
+
     # --- SUBMENU: FRECUENCIA ---
     elif data.startswith("menu_time_"):
         fid = data.split("_")[2]
@@ -202,7 +245,7 @@ async def menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
              InlineKeyboardButton("12 horas", callback_data=f"set_t_{fid}_720")],
             [InlineKeyboardButton("⬅️ Volver", callback_data=f"feed_opt_{fid}")]
         ]
-        await query.edit_message_text(f"⏱ **Frecuencia de actualización**\nSelecciona cada cuánto tiempo buscar noticias nuevas:", 
+        await query.edit_message_text(f"⏱ *Frecuencia de actualización*\nSelecciona cada cuánto tiempo buscar noticias nuevas:", 
                                     reply_markup=InlineKeyboardMarkup(keyboard), parse_mode=ParseMode.MARKDOWN)
 
     elif data.startswith("set_t_"): 
@@ -234,4 +277,4 @@ async def menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             
             kb = [[InlineKeyboardButton("🔙 Volver al Feed", callback_data=f"feed_opt_{fid}")]]
             res_icon = "✅" if ok else "❌"
-            await query.edit_message_text(f"{res_icon} **Resultado:** {msg}", reply_markup=InlineKeyboardMarkup(kb), parse_mode=ParseMode.MARKDOWN)
+            await query.edit_message_text(f"{res_icon} *Resultado:* {msg}", reply_markup=InlineKeyboardMarkup(kb), parse_mode=ParseMode.MARKDOWN)

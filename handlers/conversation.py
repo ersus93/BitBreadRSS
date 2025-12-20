@@ -3,6 +3,7 @@ from telegram.ext import ConversationHandler, ContextTypes
 from telegram.constants import ParseMode
 from core.database import DB
 from services.parser import RSSParser
+from services.resolver import RSSResolver
 from handlers.menus import show_feed_options, show_channels_menu, start
 
 # Estados
@@ -21,8 +22,8 @@ async def start_add_channel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     await query.edit_message_text(
         "➕ *Nuevo Canal*\n\n"
-        "1. Añade al bot como **Admin** en tu canal.\n"
-        "2. **Reenvía** un mensaje del canal aquí o escribe el ID.\n",
+        "1. Añade al bot como *Admin* en tu canal.\n"
+        "2. *Reenvía* un mensaje del canal aquí o escribe el ID.\n",
         reply_markup=get_cancel_kb(),
         parse_mode=ParseMode.MARKDOWN
     )
@@ -62,16 +63,20 @@ async def process_channel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         member = await context.bot.get_chat_member(cid, context.bot.id)
         if member.status not in ['administrator', 'creator']:
-            await msg.reply_text(f"⚠️ El bot detecta el canal '{title}', pero NO es **Administrador**. Dale permisos y vuelve a intentarlo.")
+            await msg.reply_text(f"⚠️ El bot detecta el canal '{title}', pero NO es *Administrador*. Dale permisos y vuelve a intentarlo.")
             return WAITING_CHANNEL
     except Exception as e:
         await msg.reply_text(f"⚠️ Error verificando permisos: {e}")
         return WAITING_CHANNEL
     
-    if await DB.add_channel(update.effective_user.id, cid, title): # Async call
-        await msg.reply_text(f"✅ Canal **{title}** vinculado correctamente.")
+    result = await DB.add_channel(update.effective_user.id, cid, title)
+    
+    if result == "success":
+        await msg.reply_text(f"✅ Canal *{title}* vinculado correctamente.")
+    elif result == "exist_global":
+        await msg.reply_text(f"⛔ *Error:* El canal *{title}* ya está registrado en el bot (por ti u otro usuario).\nNo se permiten canales duplicados para evitar saturación.")
     else:
-        await msg.reply_text(f"⚠️ El canal **{title}** ya estaba vinculado.")
+        await msg.reply_text(f"⚠️ Ocurrió un error desconocido guardando el canal.")
     
     await show_channels_menu(update, context)
     return ConversationHandler.END
@@ -88,7 +93,7 @@ async def start_add_feed(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
     await query.edit_message_text(
         "🔗 *Nuevo Feed RSS*\n\n"
-        "Envía ahora la **URL del Feed** que quieres monitorear.",
+        "Envía ahora la *URL del Feed* que quieres monitorear.",
         reply_markup=get_cancel_kb(),
         parse_mode=ParseMode.MARKDOWN
     )
@@ -101,30 +106,52 @@ async def process_feed_url(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if url.lower() == '/cancel':
         await msg.reply_text("❌ Operación cancelada.")
         return ConversationHandler.END
-
-    status_msg = await msg.reply_text("⏳ Analizando feed, espera un momento...")
     
-    parsed, error = await RSSParser.parse(url)
-    if error:
-        await status_msg.edit_text(f"❌ **Error:** No se pudo leer el RSS.\nMotivo: {error}\n\nIntenta con otro link o escribe /cancel.")
+    # Notificar al usuario que estamos "Pensando"
+    status_msg = await msg.reply_text("🔍 <b>Analizando sitio...</b>\nBuscando feeds RSS y validando acceso.", parse_mode=ParseMode.HTML)
+    
+    # --- FASE DE RESOLUCIÓN (Auditoria: Discovery Layer) ---
+    resolved_url, title, error = await RSSResolver.find_best_feed(url)
+    
+    if error or not resolved_url:
+        await status_msg.edit_text(
+            f"❌ <b>No se encontró un feed.</b>\n"
+            f"Motivo: {error}\n\n"
+            f"Intenta con el enlace directo al RSS o escribe /cancel.",
+            parse_mode=ParseMode.HTML
+        )
         return WAITING_FEED_URL 
-        
+    
+    # Obtenemos el hash inicial para evitar spam del histórico
+    # Como ya resolvimos la URL, hacemos un parse rápido para sacar el hash
+    parsed, _ = await RSSParser.parse(resolved_url)
+    first_hash = parsed['entries'][0]['hash'] if parsed and parsed['entries'] else "init"
+
+    # Guardamos en contexto temporal
     context.user_data['temp_feed'] = {
-        "url": url, 
-        "title": parsed['title'],
-        "hash": parsed['entries'][0]['hash'] if parsed['entries'] else "init"
+        "original_url": url,
+        "resolved_url": resolved_url,
+        "title": title or parsed['title'],
+        "hash": first_hash
     }
     
-    user_data = await DB.get_user(update.effective_user.id) # Async Call
+    # --- SELECCIÓN DE CANAL ---
+    user_data = await DB.get_user(update.effective_user.id)
     kb = []
     for ch in user_data['channels']:
         kb.append([InlineKeyboardButton(f"📢 {ch['title']}", callback_data=f"sel_ch_{ch['id']}")])
     
     kb.append([InlineKeyboardButton("❌ Cancelar", callback_data="cancel_process")])
 
+    text_success = (
+        f"✅ <b>Feed Detectado</b>\n"
+        f"🗞 <b>Fuente:</b> {title}\n"
+        f"🔗 <b>RSS URL:</b> {resolved_url}\n\n"
+        f"¿A qué canal quieres enviar las noticias?"
+    )
+
     await status_msg.edit_text(
-        f"✅ **Feed Encontrado:** {parsed['title']}\n\n"
-        f"¿A qué canal quieres enviar las noticias?",
+        text_success,
         reply_markup=InlineKeyboardMarkup(kb),
         parse_mode=ParseMode.HTML
     )
@@ -140,21 +167,31 @@ async def save_feed_channel(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return ConversationHandler.END
 
     try:
-        cid_str = data.replace("sel_ch_", "") 
-        cid = int(cid_str)
+        cid = int(data.replace("sel_ch_", ""))
     except:
-        await query.edit_message_text("❌ Error interno identificando el canal.")
+        await query.edit_message_text("❌ Error interno.")
         return ConversationHandler.END
     
     temp = context.user_data.get('temp_feed')
     if not temp:
-        await query.edit_message_text("❌ La sesión expiró. Por favor inicia de nuevo.")
+        await query.edit_message_text("❌ Sesión expirada.")
         return ConversationHandler.END
 
-    # Async Call
-    new_feed = await DB.add_feed(query.from_user.id, temp['url'], cid, temp['title'], temp['hash'])
+    # Usamos el nuevo método de DB con resolved_url
+    new_feed = await DB.add_feed(
+        user_id=query.from_user.id, 
+        original_url=temp['original_url'],
+        resolved_url=temp['resolved_url'],
+        channel_id=cid, 
+        source_title=temp['title'], 
+        last_hash=temp['hash']
+    )
     
-    await show_feed_options(update, context, new_feed['id'])
+    if new_feed:
+        await show_feed_options(update, context, new_feed['id'])
+    else:
+        await query.edit_message_text("⚠️ Este feed ya está configurado.")
+        
     return ConversationHandler.END
 
 # --- EDITAR PLANTILLA ---

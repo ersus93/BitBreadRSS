@@ -1,15 +1,19 @@
 import feedparser
-import aiohttp
+from curl_cffi.requests import AsyncSession
 import re
 import hashlib
-import ssl
 from bs4 import BeautifulSoup
 from utils.logger import log
 
 class RSSParser:
+    # Simulamos un navegador real (Chrome 110+)
+    IMPERSONATE = "chrome120"
+    
     HEADERS = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
         "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+        "Accept-Language": "es-ES,es;q=0.9,en;q=0.8",
+        "Referer": "https://www.google.com/",
+        "Upgrade-Insecure-Requests": "1"
     }
 
     @staticmethod
@@ -21,69 +25,74 @@ class RSSParser:
 
     @staticmethod
     def _extract_image(entry):
-        """Busca imágenes en orden de prioridad: Media > Enclosure > Content > Summary"""
-        
-        # 1. Media Content (Estándar RSS multimedia)
+        # 1. Media Content
         if 'media_content' in entry:
             for m in entry.media_content:
                 if 'image' in m.get('type', '') or m.get('medium') == 'image':
                     return m['url']
-
         # 2. Media Thumbnail
         if 'media_thumbnail' in entry and len(entry.media_thumbnail) > 0:
             return entry.media_thumbnail[0]['url']
-
-        # 3. Links Enclosures (Podcasts/Attachments)
+        # 3. Enclosures
         if 'links' in entry:
             for l in entry.links:
                 if l.get('rel') == 'enclosure' and 'image' in l.get('type', ''):
                     return l['href']
-
-        # 4. Buscar en el HTML (Content o Summary)
-        # Unimos content y summary para buscar en ambos
+        # 4. Parsing HTML content
         content_html = ""
         if 'content' in entry:
             for c in entry.content:
                 content_html += c.value
-        
         full_html = content_html + (entry.get('summary') or "")
         
         if full_html:
-            soup = BeautifulSoup(full_html, 'html.parser')
-            images = soup.find_all('img')
-            for img in images:
-                src = img.get('src')
-                if src:
-                    # Filtros básicos para evitar pixeles de tracking o emojis
-                    if "pixel" in src or "emoji" in src or ".gif" in src:
-                        continue
-                    return src
+            try:
+                soup = BeautifulSoup(full_html, 'lxml')
+                img = soup.find('img')
+                if img and img.get('src'):
+                    src = img.get('src')
+                    if not any(x in src for x in ["pixel", "emoji", ".gif"]):
+                        return src
+            except:
+                pass
         return None
 
     @staticmethod
     def _get_hash(entry):
-        # Usamos link + title para generar ID único
         raw = f"{entry.get('link', '')}{entry.get('title', '')}"
         return hashlib.md5(raw.encode()).hexdigest()
 
     @classmethod
-    async def parse(cls, url):
+    async def fetch_content(cls, url):
+        """Método robusto de obtención de contenido usando curl_cffi"""
         try:
-            ssl_ctx = ssl.create_default_context()
-            ssl_ctx.check_hostname = False
-            ssl_ctx.verify_mode = ssl.CERT_NONE
-            jar = aiohttp.CookieJar(unsafe=True)
+            async with AsyncSession(impersonate=cls.IMPERSONATE, headers=cls.HEADERS) as session:
+                response = await session.get(url, timeout=30)
+                if response.status_code not in [200, 301, 302]:
+                    return None, f"HTTP {response.status_code}"
+                return response.content, None # Retorna bytes
+        except Exception as e:
+            return None, str(e)
 
-            async with aiohttp.ClientSession(headers=cls.HEADERS, cookie_jar=jar) as session:
-                async with session.get(url, timeout=20, ssl=ssl_ctx) as response:
-                    if response.status not in [200, 301, 302]:
-                        return None, f"⚠️ Error HTTP: {response.status}"
-                    content = await response.read()
+    @classmethod
+    async def parse(cls, url):
+        """
+        Intenta parsear la URL. Si falla, el Resolver debe encargarse de encontrar la URL correcta.
+        Aquí asumimos que 'url' es un feed válido o una redirección directa.
+        """
+        content, error = await cls.fetch_content(url)
+        if error:
+            log(f"Error fetching {url}: {error}", "warning")
+            return None, error
 
+        try:
+            # feedparser procesa bytes mejor que strings con encoding incorrecto
             feed = feedparser.parse(content)
             
             if feed.bozo and not feed.entries:
-                return None, "No es un XML válido o está bloqueado."
+                if b"Cloudflare" in content or b"Just a moment" in content:
+                    return None, "Bloqueo Cloudflare JS"
+                return None, "XML inválido o bloqueado"
 
             entries = []
             for entry in feed.entries[:10]:
@@ -91,7 +100,7 @@ class RSSParser:
                     "title": cls._clean_html(entry.get('title', 'Sin título')),
                     "link": entry.get('link', ''),
                     "description": cls._clean_html(entry.get('summary', entry.get('description', ''))),
-                    "image": cls._extract_image(entry), # Nueva lógica de extracción
+                    "image": cls._extract_image(entry),
                     "hash": cls._get_hash(entry),
                     "source": feed.feed.get('title', 'RSS Source')
                 })
@@ -99,5 +108,5 @@ class RSSParser:
             return {"title": feed.feed.get('title', 'Feed'), "entries": entries}, None
 
         except Exception as e:
-            log(f"Error parsing {url}: {e}", "error")
-            return None, f"Excepción: {str(e)}"
+            log(f"Error parsing logic {url}: {e}", "error")
+            return None, f"Excepción interna: {str(e)}"
