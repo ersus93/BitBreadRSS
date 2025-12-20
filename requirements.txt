@@ -1,0 +1,7 @@
+python-telegram-bot
+feedparser
+beautifulsoup4
+aiohttp
+python-dotenv
+lxml
+brotli
