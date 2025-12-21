@@ -1,15 +1,3 @@
-### Recomendación de Licencia
-
-Para este tipo de proyectos (herramientas de automatización y bots), te recomiendo usar la **Licencia MIT**.
-
-* **¿Por qué?**: Es extremadamente permisiva y popular en GitHub. Permite que otros usen, copien y modifiquen tu código (incluso para fines comerciales), siempre que te den crédito. Esto fomenta que la comunidad contribuya y use tu bot sin miedo a restricciones legales complejas.
-* **Alternativa (GPLv3)**: Si quieres obligar a que cualquier persona que modifique tu bot y lo publique también tenga que liberar su código fuente, usa **GPLv3**.
-
----
-
-### Propuesta de README.md
-
-```markdown
 # 🤖 BitBread RSS Bot
 
 BitBread es un bot de Telegram robusto y asíncrono diseñado para gestionar feeds RSS y automatizar el envío de noticias a canales de Telegram con un formato elegante y profesional.
@@ -88,10 +76,3 @@ Este proyecto está bajo la Licencia **MIT**. Consulta el archivo `LICENSE` para
 
 *Desarrollado con ❤️ para la comunidad de Telegram.*
 
-```
-
-### Detalles adicionales para tu publicación:
-* **Requisitos técnicos**: Asegúrate de que tu `requirements.txt` incluya `lxml`, ya que tu código lo usa explícitamente en `BeautifulSoup` para una mayor velocidad.
-* **Seguridad**: El bot incluye un sistema de protección contra errores consecutivos que aumenta el intervalo de espera si un feed falla repetidamente, evitando que el bot sea baneado por los sitios fuente.
-
-```
