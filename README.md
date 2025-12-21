@@ -1,7 +1,3 @@
-Este es un diseño profesional para el archivo `README.md` de tu proyecto, basado en la estructura y lógica de los archivos proporcionados. También incluyo una recomendación sobre la licencia.
-
----
-
 ### Recomendación de Licencia
 
 Para este tipo de proyectos (herramientas de automatización y bots), te recomiendo usar la **Licencia MIT**.
