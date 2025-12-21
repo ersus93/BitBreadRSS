@@ -888,3 +888,5 @@ while true; do
             ;;
     esac
 done
+
+# De nada, ¡Gracias por usar BBAlert v3! 🤖✨
