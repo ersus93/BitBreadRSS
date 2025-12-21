@@ -201,3 +201,18 @@ class DB:
                 await cls.save()
                 return True
         return False
+    
+    @classmethod
+    async def update_feed_rhash(cls, user_id, feed_id, rhash):
+        """Guarda el identificador rhash para Instant View."""
+        data = await cls.get_user(user_id)
+        for feed in data['feeds']:
+            if feed['id'] == feed_id:
+                # Si el rhash es "none" o vacío, lo eliminamos
+                if not rhash or rhash.lower() == 'none':
+                    feed.pop('rhash', None)
+                else:
+                    feed['rhash'] = rhash
+                await cls.save()
+                return True
+        return False

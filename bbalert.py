@@ -18,7 +18,7 @@ from handlers.menus import start, help_command, menu_handler
 from handlers.conversation import (
     start_add_channel, process_channel, WAITING_CHANNEL,
     start_add_feed, process_feed_url, save_feed_channel, WAITING_FEED_URL, WAITING_FEED_CHANNEL,
-    start_edit_template, save_template, WAITING_TEMPLATE, cancel
+    start_edit_template, save_template, WAITING_TEMPLATE, cancel, start_set_rhash, save_rhash, WAITING_RHASH
 )
 
 warnings.filterwarnings("ignore", category=PTBUserWarning)
@@ -95,9 +95,11 @@ def main():
         entry_points=[
             CallbackQueryHandler(start_add_channel, pattern="^add_channel$"),
             CallbackQueryHandler(start_add_feed, pattern="^add_feed$"),
-            CallbackQueryHandler(start_edit_template, pattern="^tmpl_feed_")
+            CallbackQueryHandler(start_edit_template, pattern="^tmpl_feed_"),
+            CallbackQueryHandler(start_set_rhash, pattern="^set_iv_")
         ],
         states={
+            WAITING_RHASH: [MessageHandler(filters.TEXT & ~filters.COMMAND, save_rhash)],
             WAITING_CHANNEL: [MessageHandler(filters.ALL & ~filters.COMMAND, process_channel)],
             WAITING_FEED_URL: [MessageHandler(filters.TEXT & ~filters.COMMAND, process_feed_url)],
             WAITING_FEED_CHANNEL: [CallbackQueryHandler(save_feed_channel, pattern="^sel_ch_")],

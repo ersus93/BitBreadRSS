@@ -5,6 +5,7 @@ from telegram.constants import ParseMode
 from core.database import DB
 from services.parser import RSSParser
 from services.resolver import RSSResolver
+from services.iv_generator import create_instant_view_link
 from utils.logger import log
 from utils.common import truncate_text
 import logging
@@ -143,18 +144,33 @@ class RSSMonitor:
     async def _send_entry(self, feed, entry):
         template = feed.get('template') or DEFAULT_TEMPLATE
         style = feed.get('style', 'bitbread') 
-        
+
+        # --- LÓGICA INSTANT VIEW ---
+        user_rhash = feed.get('rhash')
+
+        # 2. Generamos el link (el generador ahora es inteligente)
+        iv_link = create_instant_view_link(entry['link'], user_rhash)
+
+        # 3. Reemplazamos en la plantilla de mensaje
         text = template.replace("#title#", entry['title'])\
+                       .replace("#description#", entry['description'])\
                        .replace("#link#", entry['link'])\
-                       .replace("#source#", entry['source'])
+                       .replace("#source#", entry['source'])\
+                       .replace("#sourceiv#", iv_link)
         
         desc = entry['description']
         text = text.replace("#description#", desc)
 
+        # Calculamos el límite real restando la longitud extra del enlace IV
+        # Un enlace IV añade aprox 150-250 caracteres ocultos en HTML [cite: 78]
+        offset = len(iv_link) - len(entry['link']) if user_rhash else 0
+        limit_caption = 1024 - max(0, offset) 
+        limit_text = 4090 - max(0, offset)
+
         # 1. Intentar enviar FOTO (Estilo BitBread)
         if style == 'bitbread' and entry['image']:
             try:
-                safe_caption = truncate_text(text, limit=1024)
+                safe_caption = truncate_text(text, limit=int(limit_caption))
                 await self.bot.send_photo(
                     chat_id=feed['channel_id'],
                     photo=entry['image'],
@@ -168,7 +184,7 @@ class RSSMonitor:
 
         # 2. Fallback a TEXTO (Estilo Texto o si falló la foto)
         try:
-            safe_text = truncate_text(text, limit=4090)
+            safe_text = truncate_text(text, limit=int(limit_text))
             await self.bot.send_message(
                 chat_id=feed['channel_id'],
                 text=safe_text,

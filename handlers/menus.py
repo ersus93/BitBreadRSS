@@ -113,6 +113,7 @@ async def show_feed_options(update: Update, context: ContextTypes.DEFAULT_TYPE, 
     url_safe = html.escape(feed.get('url', '...'))
     style_label = "🖼️ FOTO (BitBread)" if feed.get('style') == 'bitbread' else "📄 TEXTO"
     interval = feed.get('interval', 10)
+    rhash_status = "✅" if feed.get('rhash') else "❌"
     
     txt = (
         f"⚙️ <b>Configuración de Feed</b>\n\n"
@@ -124,7 +125,8 @@ async def show_feed_options(update: Update, context: ContextTypes.DEFAULT_TYPE, 
     )
 
     kb = [
-        [InlineKeyboardButton("📢 Cambiar Destino", callback_data=f"move_feed_{feed_id}")], # NUEVO BOTÓN
+        [InlineKeyboardButton("📢 Cambiar Destino", callback_data=f"move_feed_{feed_id}")],
+        [InlineKeyboardButton(f"⚡ IV ({rhash_status})", callback_data=f"set_iv_{feed_id}")],
         [InlineKeyboardButton("🎨 Cambiar Estilo", callback_data=f"toggle_style_{feed_id}")],
         [InlineKeyboardButton("⏱ Frecuencia", callback_data=f"menu_time_{feed_id}")],
         [InlineKeyboardButton("📝 Editar Plantilla", callback_data=f"tmpl_feed_{feed_id}")],
@@ -152,7 +154,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "*2. Añadir Feed:*\n"
         "Ve a 'Mis Feeds' -> 'Nuevo'. Pega el enlace RSS.\n\n"
         "*Plantillas:*\n"
-        "`#title#`, `#link#`, `#description#`, `#source#`.\n"
+        "`#title#`, `#link#`, `#description#`, `#source#`, `#sourceiv#`.\n"
         "Usa HTML (`<b>`, `<a>`) para dar formato."
     )
     kb = [[InlineKeyboardButton("🔙 Volver", callback_data="start")]]

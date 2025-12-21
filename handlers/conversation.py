@@ -208,7 +208,8 @@ async def start_edit_template(update: Update, context: ContextTypes.DEFAULT_TYPE
         "`#title#` - Título\n"
         "`#link#` - Enlace\n"
         "`#description#` - Resumen\n"
-        "`#source#` - Fuente\n\n"
+        "`#source#` - Fuente\n"
+        "`#sourceiv#` - Enlace Instant View ⚡\n\n"
         "⚠️ *Soporta HTML* (negrita `<b>`, cursiva `<i>`, enlaces `<a href='...'>`).\n\n"
         "Escribe /cancel para cancelar.",
         reply_markup=get_cancel_kb(),
@@ -239,5 +240,50 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await start(update, context)
     else:
         await update.message.reply_text("❌ Operación cancelada.")
+        
+    return ConversationHandler.END
+
+# Nuevo Estado
+WAITING_RHASH = 5
+
+# --- CONFIGURAR INSTANT VIEW ---
+async def start_set_rhash(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    
+    fid = query.data.split("_")[2]
+    context.user_data['edit_fid'] = fid
+    
+    await query.edit_message_text(
+        "⚡ *Configurar Instant View*\n\n"
+        "Envía el código *rhash* de tu plantilla de Telegram.\n"
+        "_(Ejemplo: abcdef123456)_\n\n"
+        "Si no sabes qué es esto, visita `instantview.telegram.org`.\n"
+        "Envía 'none' para desactivarlo o /cancel para salir.",
+        parse_mode=ParseMode.MARKDOWN
+    )
+    return WAITING_RHASH
+
+async def save_rhash(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    msg = update.message
+    rhash_input = msg.text.strip()
+
+    if rhash_input.lower() == '/cancel':
+        await msg.reply_text("Operación cancelada.")
+        return ConversationHandler.END
+
+    fid = context.user_data.get('edit_fid')
+    
+    # Validación básica (alfanumérico) [cite: 56]
+    if not rhash_input.isalnum() and rhash_input.lower() != 'none':
+        await msg.reply_text("⚠️ El rhash solo debe contener letras y números. Intenta de nuevo.")
+        return WAITING_RHASH
+
+    if await DB.update_feed_rhash(update.effective_user.id, fid, rhash_input):
+        status = "desactivado" if rhash_input.lower() == 'none' else "activado"
+        await msg.reply_text(f"✅ Instant View {status} correctamente.\nRecuerda usar `#sourceiv#` en tu plantilla.")
+        await show_feed_options(update, context, fid)
+    else:
+        await msg.reply_text("❌ Error: No se encontró el feed.")
         
     return ConversationHandler.END

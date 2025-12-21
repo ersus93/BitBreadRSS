@@ -21,7 +21,17 @@ def clean_html(raw_html):
     return text.strip()
 
 def truncate_text(text, limit=1000):
-    """Corta el texto si excede el límite (1024 para captions de fotos)."""
+    """Corta el texto asegurando no romper etiquetas HTML al final."""
     if len(text) <= limit:
         return text
-    return text[:limit-3] + "..."
+    
+    # Corte simple
+    cut_text = text[:limit-3] + "..."
+    
+    # Comprobación básica de seguridad: si cortamos dentro de una etiqueta <a ...>
+    # Esto es vital para #sourceiv# 
+    if cut_text.count('<a') != cut_text.count('</a>'):
+        # Si falta el cierre, cerramos forzosamente (solución rápida)
+        cut_text += '</a>'
+        
+    return cut_text
