@@ -216,3 +216,55 @@ class DB:
                 await cls.save()
                 return True
         return False
+    
+    @classmethod
+    async def get_stats(cls):
+        """Cálculo de estadísticas globales detalladas (Dashboard)"""
+        data = await cls.load()
+        
+        stats = {
+            "users": len(data),
+            "channels": 0,
+            "feeds": 0,
+            "feeds_active": 0,
+            "feeds_with_errors": 0,
+            "total_sent": 0,
+            "total_errors": 0,
+            "db_size": 0
+        }
+        
+        # 1. Métricas de Datos
+        for user_info in data.values():
+            stats["channels"] += len(user_info.get('channels', []))
+            
+            feeds = user_info.get('feeds', [])
+            stats["feeds"] += len(feeds)
+            
+            for f in feeds:
+                if f.get('active', True):
+                    stats["feeds_active"] += 1
+                
+                f_stats = f.get('stats', {})
+                sent = f_stats.get('sent', 0)
+                errors = f_stats.get('errors', 0)
+                
+                stats["total_sent"] += sent
+                stats["total_errors"] += errors
+                
+                if errors > 0:
+                    stats["feeds_with_errors"] += 1
+
+        # 2. Métricas de Archivo
+        try:
+            stats["db_size"] = os.path.getsize(RSS_DATA_FILE) / 1024 # KB
+        except:
+            stats["db_size"] = 0
+            
+        return stats
+    
+    
+    @classmethod
+    async def get_all_user_ids(cls):
+        """Retorna una lista con todos los IDs de usuarios registrados."""
+        data = await cls.load()
+        return list(data.keys())

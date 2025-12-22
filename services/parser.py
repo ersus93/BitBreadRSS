@@ -70,7 +70,7 @@ class RSSParser:
         
         try:
             async with AsyncSession(impersonate=current_profile, headers=cls.HEADERS) as session:
-                response = await session.get(url, timeout=30)
+                response = await session.get(url, timeout=60)
                 
                 # Si recibimos 403 (Forbidden) o 503 (Service Unavailable - común en Cloudflare)
                 if response.status_code in [403, 503, 429]:

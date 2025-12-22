@@ -6,3 +6,4 @@ python-dotenv
 lxml
 brotli
 curl_cffi
+psutil

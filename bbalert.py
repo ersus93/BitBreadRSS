@@ -9,19 +9,20 @@ import json
 import traceback
 from telegram.ext import ApplicationBuilder, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ConversationHandler
 from telegram.constants import ParseMode
-from telegram.warnings import PTBUserWarning
 from telegram import ReplyKeyboardMarkup, KeyboardButton, Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
+from telegram.warnings import PTBUserWarning
+warnings.filterwarnings("ignore", category=PTBUserWarning)
 from core.config import TOKEN, ADMIN_ID
 from services.monitor import RSSMonitor
 from handlers.menus import start, help_command, menu_handler
+from handlers.admin import stats, logs_command, ms_handler
 from handlers.conversation import (
     start_add_channel, process_channel, WAITING_CHANNEL,
     start_add_feed, process_feed_url, save_feed_channel, WAITING_FEED_URL, WAITING_FEED_CHANNEL,
     start_edit_template, save_template, WAITING_TEMPLATE, cancel, start_set_rhash, save_rhash, WAITING_RHASH
 )
 
-warnings.filterwarnings("ignore", category=PTBUserWarning)
 
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 logging.getLogger("httpx").setLevel(logging.WARNING)
@@ -114,6 +115,10 @@ def main():
     app.add_handler(CommandHandler("start", start))
     app.add_handler(MessageHandler(filters.Text("🏠 Mostrar menú inicio"), start))
     app.add_handler(CommandHandler("help", help_command))
+    app.add_handler(CommandHandler("logs", logs_command))
+    app.add_handler(CommandHandler("stats", stats))
+    app.add_handler(CallbackQueryHandler(stats, pattern="^admin_refresh_stats$"))
+    app.add_handler(ms_handler)
     app.add_handler(conv_handler)
     app.add_handler(CallbackQueryHandler(menu_handler))
 

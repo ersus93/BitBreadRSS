@@ -15,9 +15,9 @@ logging.getLogger("telegram.ext").setLevel(logging.ERROR)
 
 # Plantilla Base
 DEFAULT_TEMPLATE = (
-    "<b>📰 #title#</b>\n\n"
+    "<b>#title#</b>\n\n"
     "<i>#description#</i>\n\n"
-    "<i><b>🔗 Fuente:</b><a href='#link#'> #source#</a></i>"
+    "<i><b>🔗 Fuente:</b><a href='#link#'>#source#</a></i>"
 )
 
 class RSSMonitor:
@@ -39,30 +39,45 @@ class RSSMonitor:
                 await asyncio.sleep(60) 
 
     async def _check_feeds(self):
+        """
+        Versión blindada:
+        1. Elimina duplicidad de lógica.
+        2. Maneja errores de scope.
+        3. Optimiza el guardado de DB.
+        """
         data = await DB.load()
+        cambios_globales = False # Flag para saber si necesitamos guardar DB al final
 
-        # Iteramos sobre los usuarios y sus feeds
+        # Iteramos sobre una copia de la lista para evitar errores si el dict cambia
         for user_id, user_data in list(data.items()):
             for feed in user_data.get('feeds', []):
-                # --- INICIO DEL BLOQUE DE PROTECCIÓN ---
+                
+                # --- VARIABLES DE SCOPE ---
+                # Las definimos antes del try para evitar "UnboundLocalError"
+                parsed = None
+                error = None
+                
                 try: 
                     if not feed.get('active'): continue
 
-                    # Validar intervalo de tiempo
+                    # --- 1. VALIDACIÓN DE INTERVALO ---
                     ahora = time.time()
                     ultimo_check = feed.get('last_check', 0)
-                    intervalo_segundos = int(feed.get('interval', 10)) * 60
+                    intervalo_base = int(feed.get('interval', 10)) * 60
                     
+                    # Backoff exponencial inteligente: Si falla mucho, espera más
                     errores_consecutivos = feed.get('stats', {}).get('errors', 0)
-                    # Corregido: 'errors' -> 'errores'
                     if errores_consecutivos > 0:
-                        # Asegúrate de usar la misma variable aquí dentro también
-                        multiplicador = min(errores_consecutivos, 4)
-                        intervalo_segundos *= multiplicador
+                        # Si hay errores, multiplicamos el tiempo de espera (max 4x)
+                        multiplicador = min(errores_consecutivos + 1, 4)
+                        intervalo_real = intervalo_base * multiplicador
+                    else:
+                        intervalo_real = intervalo_base
 
-                    if ahora - ultimo_check < intervalo_segundos:
+                    if ahora - ultimo_check < intervalo_real:
                         continue
 
+                    # --- 2. OBTENCIÓN DEL FEED ---
                     async with self.semaphore:
                         parsed, error = await RSSParser.parse(feed['url'])
 
@@ -74,72 +89,65 @@ class RSSMonitor:
                             if new_url and new_url != feed['url']:
                                 log(f"✅ Feed reparado: {new_url}")
                                 await DB.update_feed_url(user_id, feed['id'], new_url)
+                                # Reintentamos con la nueva URL inmediatamente
                                 parsed, error = await RSSParser.parse(new_url)
                             else:
                                 log(f"❌ Falló reparación automática: {res_err}", "error")
 
-                    # Procesamiento de resultados
+                    # --- 3. GESTIÓN DE ERRORES ---
                     if error:
                         feed['stats']['errors'] = feed.get('stats', {}).get('errors', 0) + 1
                         log(f"⚠️ Fallo en {feed['url']}: {error}", "warning")
+                        # Importante: Guardamos el incremento de errores para el backoff
+                        await DB.save() 
                         continue
                     
-                    # Éxito
+                    # Si llegamos aquí, fue ÉXITO
                     feed['stats']['errors'] = 0 
+                    feed['last_check'] = ahora # Actualizamos tiempo aquí para evitar check loop si falla el envío
+                    
+                    # --- 4. FILTRADO Y ENVÍO ---
                     history = feed.get('history', [])
+                    # Usamos un set temporal para búsquedas más rápidas
+                    history_set = set(history)
                     new_entries = []
                     
+                    # Filtramos duplicados
                     for entry in reversed(parsed['entries']):
-                        if entry['hash'] not in history:
+                        if entry['hash'] not in history_set:
                             new_entries.append(entry)
 
                     if new_entries:
-                        feed['last_check'] = ahora
+                        entries_sent_count = 0
                         for entry in new_entries:
+                            # Enviamos mensaje
                             success = await self._send_entry(feed, entry)
+                            
                             if success:
+                                # ACTUALIZACIÓN ATÓMICA:
+                                # Añadimos al historial inmediatamente tras enviar
                                 feed['history'].append(entry['hash'])
+                                history_set.add(entry['hash']) # Actualizamos set local
                                 feed['stats']['sent'] += 1
-                                if len(feed['history']) > 50: feed['history'].pop(0)
+                                entries_sent_count += 1
                         
-                        await DB.save()
-                    
-                    await asyncio.sleep(1)
+                        # Mantenemos el historial limpio (máx 50)
+                        if len(feed['history']) > 50:
+                            feed['history'] = feed['history'][-50:]
+                        
+                        # Guardamos en DB solo si hubo envíos exitosos
+                        if entries_sent_count > 0:
+                            await DB.save()
+                            log(f"✅ {entries_sent_count} noticias enviadas de {feed['title']}")
+
+                    # Pequeña pausa para no saturar CPU
+                    await asyncio.sleep(0.5)
 
                 except Exception as e:
-                    # Esto evita que un feed corrupto detenga todo el bot
-                    log(f"❌ Error procesando feed {feed.get('url', 'desconocido')}: {e}", "error")
-                    continue
-                # --- FIN DEL BLOQUE DE PROTECCIÓN ---
-
-                # 4. Procesamiento de resultados (Misma lógica que tenías, pero manejando errores)
-                if error:
+                    # Captura global para que un feed corrupto no mate el monitor
+                    log(f"❌ Error CRÍTICO procesando feed {feed.get('url', 'desconocido')}: {e}", "error")
                     feed['stats']['errors'] = feed.get('stats', {}).get('errors', 0) + 1
-                    log(f"⚠️ Fallo en {feed['url']}: {error}", "warning")
                     continue
-                
-                # Si tuvo éxito, reseteamos contador de errores
-                feed['stats']['errors'] = 0 
-                
-                history = feed.get('history', [])
-                new_entries = []
-                
-                for entry in reversed(parsed['entries']):
-                    if entry['hash'] not in history:
-                        new_entries.append(entry)
-
-                if new_entries:
-                    feed['last_check'] = ahora
-                    for entry in new_entries:
-                        success = await self._send_entry(feed, entry)
-                        if success:
-                            feed['history'].append(entry['hash'])
-                            feed['stats']['sent'] += 1
-                            if len(feed['history']) > 50: feed['history'].pop(0)
-                    
-                    await DB.save()
-                
-                await asyncio.sleep(1)
 
     async def _send_entry(self, feed, entry):
         template = feed.get('template') or DEFAULT_TEMPLATE
