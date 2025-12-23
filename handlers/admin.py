@@ -125,7 +125,7 @@ async def logs_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if os.path.exists(LOG_FILE_PATH):
         with open(LOG_FILE_PATH, "r", encoding="utf-8") as f:
             lines = f.readlines()
-            log_tail = "".join(lines[-15:])
+            log_tail = "".join(lines[-25:])
     else:
         log_tail = "Archivo de log no encontrado."
 
