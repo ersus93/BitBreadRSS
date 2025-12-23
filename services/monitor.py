@@ -17,7 +17,7 @@ logging.getLogger("telegram.ext").setLevel(logging.ERROR)
 DEFAULT_TEMPLATE = (
     "<b>#title#</b>\n\n"
     "<i>#description#</i>\n\n"
-    "<i><b>🔗 Fuente:</b><a href='#link#'>#source#</a></i>"
+    "<i><b>🔗 Fuente:</b><a href='#link#'> #source#</a></i>"
 )
 
 class RSSMonitor:
