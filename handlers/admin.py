@@ -1,9 +1,10 @@
 import os
+import time
+import psutil 
 import platform
 import sys
 import asyncio
 import warnings
-import time
 from datetime import timedelta
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes, ConversationHandler, CommandHandler, MessageHandler, filters, CallbackQueryHandler
@@ -12,7 +13,6 @@ from telegram.warnings import PTBUserWarning
 warnings.filterwarnings("ignore", category=PTBUserWarning)
 from core.database import DB
 from core.config import ADMIN_ID
-import psutil 
 from utils.logger import LOG_FILE_PATH
 
 # --- ESTADOS DE LA CONVERSACIÓN ---
@@ -32,6 +32,10 @@ def _get_progress_bar(percent, length=10):
     return "▓" * filled + "░" * (length - filled)
 
 # --- COMANDOS DE INFORMACIÓN (STATS / LOGS) ---
+# Inicializamos el proceso global para monitoreo de CPU
+proc_global = psutil.Process(os.getpid())
+# Hacemos una primera lectura "falsa" al arrancar para iniciar el contador
+proc_global.cpu_percent(interval=None)
 
 async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """
@@ -49,7 +53,7 @@ async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     # Recursos
     mem_usage = process.memory_info().rss / 1024 / 1024 # MB
-    cpu_percent = process.cpu_percent(interval=None) # Instantáneo
+    cpu_percent = proc_global.cpu_percent(interval=None) # Instantáneo
     
     # 2. Obtener métricas de Negocio (Base de Datos)
     s = await DB.get_stats()
@@ -67,7 +71,7 @@ async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # 3. Construcción del Mensaje (HTML)
     msg = (
         f"<b>📊 BITBREAD CONTROL CENTER</b>\n"
-        f"────────────────\n\n"
+        f"———————————————————\n\n"
         
         f"<b>🖥️ ESTADO DEL SISTEMA</b>\n"
         f"├ <b>Estado:</b> {status_icon}\n"
