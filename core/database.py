@@ -268,3 +268,38 @@ class DB:
         """Retorna una lista con todos los IDs de usuarios registrados."""
         data = await cls.load()
         return list(data.keys())
+    
+    @classmethod
+    async def toggle_twitter_replies(cls, user_id, feed_id):
+        """
+        Alterna entre incluir o excluir respuestas en feeds de Twitter/Nitter.
+        Modifica directamente la URL técnica.
+        """
+        data = await cls.get_user(user_id)
+        for feed in data['feeds']:
+            if feed['id'] == feed_id:
+                current_url = feed.get('url', '')
+                
+                # Verificamos si es una URL de Nitter (contiene /rss)
+                if '/rss' not in current_url:
+                    return None # No es compatible
+                
+                # Lógica de switch
+                if '/with_replies/' in current_url:
+                    # ESTADO: Activado -> Desactivar
+                    # Quitamos '/with_replies' de la ruta
+                    new_url = current_url.replace('/with_replies/', '/')
+                    feed['include_replies'] = False
+                else:
+                    # ESTADO: Desactivado -> Activar
+                    # Insertamos '/with_replies/' antes de '/rss'
+                    # La mayoría de instancias Nitter usan formato /usuario/rss -> /usuario/with_replies/rss
+                    new_url = current_url.replace('/rss', '/with_replies/rss')
+                    feed['include_replies'] = True
+                
+                feed['url'] = new_url
+                # Reseteamos el hash para que no detecte los viejos como nuevos de golpe, 
+                # o forzamos check. Aquí solo guardamos.
+                await cls.save()
+                return feed['include_replies']
+        return None

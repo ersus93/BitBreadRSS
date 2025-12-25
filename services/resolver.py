@@ -1,4 +1,5 @@
 import asyncio
+import random
 import json
 import urllib.parse
 from urllib.parse import urljoin, urlparse
@@ -31,6 +32,40 @@ class RSSResolver:
         
         candidates = []
         domain_error = None
+
+        # --- BLOQUE TWITTER / X MEJORADO ---
+        if "twitter.com" in url or "x.com" in url or "nitter" in url:
+            username = RSSParser._get_twitter_username(url)
+            
+            if username:
+                log(f"🐦 Buscando feed para @{username}...")
+                
+                # 1. Intentar instancias Nitter (Método preferido)
+                instances = RSSParser.NITTER_INSTANCES.copy()
+                random.shuffle(instances)
+
+                for nitter_base in instances:
+                    # Probamos la ruta estándar de Nitter
+                    nitter_url = f"{nitter_base}/{username}/rss"
+                    log(f"   👉 Probando Nitter: {nitter_base}...")
+                    
+                    content, error = await RSSParser.fetch_content(nitter_url)
+                    
+                    if not error and RSSParser.is_valid_xml(content):
+                        log(f"   ✅ ¡Nitter encontrado en {nitter_base}!")
+                        return nitter_url, f"Twitter: @{username}", None
+                
+                # 2. FALLBACK: Si Nitter falla, probamos RSSHub (La opción nuclear)
+                log("   ⚠️ Nitter falló. Probando RSSHub (Bridge)...")
+                rsshub_url = f"https://rsshub.app/twitter/user/{username}"
+                content, error = await RSSParser.fetch_content(rsshub_url)
+                
+                if not error and RSSParser.is_valid_xml(content):
+                    log(f"   ✅ ¡RSSHub funcionó!")
+                    return rsshub_url, f"Twitter: @{username}", None
+                else:
+                    return None, None, "No se pudo obtener el feed de Twitter (Nitter y RSSHub bloqueados)."
+        # -----------------------------------
 
         # 1. Intento Directo en la URL dada (Home o URL completa)
         content, error = await RSSParser.fetch_content(url)

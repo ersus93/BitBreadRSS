@@ -81,18 +81,38 @@ class RSSMonitor:
                     async with self.semaphore:
                         parsed, error = await RSSParser.parse(feed['url'])
 
-                        # Lógica de Auto-Reparación (WAF 403)
-                        if error and "403" in str(error):
-                            log(f"🛡️ WAF detectado en {feed['url']}. Intentando bypass...", "warning")
-                            new_url, new_title, res_err = await RSSResolver.find_best_feed(feed['original_url'])
+                        # === LÓGICA DE AUTO-REPARACIÓN MEJORADA ===
+                        is_nitter = "nitter" in feed['url']
+                        needs_repair = False
+
+                        if error:
+                            if is_nitter:
+                                # ¡CAMBIO CRÍTICO! Si es Nitter, reparamos ante CUALQUIER error
+                                # (DNS, Conexión rechazada, 404, 503, etc.)
+                                needs_repair = True 
+                            elif "403" in str(error) or "429" in str(error):
+                                needs_repair = True # RSS normal solo si es bloqueo WAF
+
+                        if needs_repair:
+                            err_type = "Instancia Caída" if is_nitter else "WAF Bloqueo"
+                            log(f"🛡️ {err_type} en {feed['url']}. Iniciando rotación...", "warning")
+                            
+                            # Usamos la URL original para buscar una nueva instancia
+                            target_url = feed.get('original_url')
+                            # Si no hay original o no parece twitter, usamos la actual para que el resolver extraiga el user
+                            if not target_url or ("twitter" not in target_url and "x.com" not in target_url):
+                                target_url = feed['url'] 
+
+                            new_url, new_title, res_err = await RSSResolver.find_best_feed(target_url)
                             
                             if new_url and new_url != feed['url']:
-                                log(f"✅ Feed reparado: {new_url}")
+                                log(f"✅ Feed reparado: {feed['url']} -> {new_url}")
                                 await DB.update_feed_url(user_id, feed['id'], new_url)
-                                # Reintentamos con la nueva URL inmediatamente
+                                # Reintentamos INMEDIATAMENTE con la nueva URL
                                 parsed, error = await RSSParser.parse(new_url)
                             else:
-                                log(f"❌ Falló reparación automática: {res_err}", "error")
+                                log(f"❌ Falló reparación: {res_err}", "error")
+                        # ==========================================
 
                     # --- 3. GESTIÓN DE ERRORES ---
                     if error:
@@ -130,6 +150,7 @@ class RSSMonitor:
                                 history_set.add(entry['hash']) # Actualizamos set local
                                 feed['stats']['sent'] += 1
                                 entries_sent_count += 1
+                                await asyncio.sleep(2.0) # Pequeña pausa entre envíos
                         
                         # Mantenemos el historial limpio (máx 50)
                         if len(feed['history']) > 50:
@@ -175,20 +196,37 @@ class RSSMonitor:
         limit_caption = 1024 - max(0, offset) 
         limit_text = 4090 - max(0, offset)
 
-        # 1. Intentar enviar FOTO (Estilo BitBread)
-        if style == 'bitbread' and entry['image']:
+        # 1. Intentar enviar MULTIMEDIA (Video o Foto) si el estilo es 'bitbread'
+        if style == 'bitbread':
             try:
                 safe_caption = truncate_text(text, limit=int(limit_caption))
-                await self.bot.send_photo(
-                    chat_id=feed['channel_id'],
-                    photo=entry['image'],
-                    caption=safe_caption,
-                    parse_mode=ParseMode.HTML
-                )
-                return True
+                
+                # A) PRIORIDAD VIDEO: Si hay video detectado (común en X/Twitter)
+                if entry.get('video'):
+                    await self.bot.send_video(
+                        chat_id=feed['channel_id'],
+                        video=entry['video'],
+                        caption=safe_caption,
+                        parse_mode=ParseMode.HTML,
+                        read_timeout=30, # Dar más tiempo para subir videos
+                        write_timeout=30
+                    )
+                    return True
+
+                # B) FOTO: Si no hay video, probamos imagen
+                elif entry.get('image'):
+                    await self.bot.send_photo(
+                        chat_id=feed['channel_id'],
+                        photo=entry['image'],
+                        caption=safe_caption,
+                        parse_mode=ParseMode.HTML
+                    )
+                    return True
+                    
             except Exception as e:
-                # Si falla la foto, hacemos log y dejamos que baje a enviar TEXTO
-                log(f"⚠️ Falló foto en {feed['channel_id']}, intentando texto. Err: {e}", "warning")
+                # Si falla el envío de media (ej. archivo muy grande o formato raro),
+                # hacemos log y dejamos que el código continúe hacia abajo para enviar solo TEXTO.
+                log(f"⚠️ Falló multimedia en {feed['channel_id']} (intentando texto). Err: {e}", "warning")
 
         # 2. Fallback a TEXTO (Estilo Texto o si falló la foto)
         try:

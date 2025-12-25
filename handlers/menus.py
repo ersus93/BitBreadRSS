@@ -94,6 +94,20 @@ async def show_feed_options(update: Update, context: ContextTypes.DEFAULT_TYPE, 
     user_id = update.effective_user.id
     data = await DB.get_user(user_id)
     feed = next((f for f in data['feeds'] if f['id'] == feed_id), None)
+
+    # --- BLOQUE NUEVO PARA DETECTAR TWITTER ---
+    is_twitter = False
+    orig = feed.get('original_url', '').lower()
+    if 'twitter.com' in orig or 'x.com' in orig:
+        is_twitter = True
+        replies_active = feed.get('include_replies', False) # Leemos el flag que guardamos en DB
+        # Determinamos el icono según si la URL actual tiene 'with_replies' (doble check visual)
+        if '/with_replies/' in feed.get('url', ''):
+             replies_active = True
+             
+        replies_icon = "✅" if replies_active else "❌"
+        btn_text = f"💬 Respuestas: {replies_icon}"
+    # ------------------------------------------
     
     if not feed:
         error_txt = "❌ *Error:* No se encuentra el feed solicitado."
@@ -126,15 +140,18 @@ async def show_feed_options(update: Update, context: ContextTypes.DEFAULT_TYPE, 
 
     kb = [
         [InlineKeyboardButton("📢 Cambiar Destino", callback_data=f"move_feed_{feed_id}")],
-        [InlineKeyboardButton(f"⚡ IV ({rhash_status})", callback_data=f"set_iv_{feed_id}")],
+        #[InlineKeyboardButton(f"⚡ IV ({rhash_status})", callback_data=f"set_iv_{feed_id}")],
+        [InlineKeyboardButton("🔄 Actualizar URL", callback_data=f"update_url_{feed_id}")],
         [InlineKeyboardButton("🎨 Cambiar Estilo", callback_data=f"toggle_style_{feed_id}")],
         [InlineKeyboardButton("⏱ Frecuencia", callback_data=f"menu_time_{feed_id}")],
         [InlineKeyboardButton("📝 Editar Plantilla", callback_data=f"tmpl_feed_{feed_id}")],
-        [InlineKeyboardButton("⚡ Probar Envío", callback_data=f"test_feed_{feed_id}")],
-        [InlineKeyboardButton("🗑 Eliminar Feed", callback_data=f"del_feed_{feed_id}")],
-        [InlineKeyboardButton("🔙 Volver a la lista", callback_data="menu_feeds")]
+        [InlineKeyboardButton("⚡ Probar Envío", callback_data=f"test_feed_{feed_id}")],    
     ]
-    
+    if is_twitter:
+        kb.append([InlineKeyboardButton(btn_text, callback_data=f"tog_rep_{feed_id}")])
+    kb.append([InlineKeyboardButton("🗑 Eliminar Feed", callback_data=f"del_feed_{feed_id}")])
+    kb.append([InlineKeyboardButton("🔙 Volver a la lista", callback_data="menu_feeds")])
+
     markup = InlineKeyboardMarkup(kb)
     
     try:
@@ -192,6 +209,19 @@ async def menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await show_channels_menu(update, context)
         except Exception as e:
             print(f"Error borrando canal: {e}")
+
+    elif data.startswith("tog_rep_"):
+        fid = data.split("_")[2]
+        # Llamamos a la DB para hacer el cambio
+        new_status = await DB.toggle_twitter_replies(user_id, fid)
+        
+        if new_status is None:
+            await query.answer("⚠️ No se pudo cambiar (¿Es un feed de X válido?)", show_alert=True)
+        else:
+            state = "ACTIVADAS" if new_status else "DESACTIVADAS"
+            await query.answer(f"Respuestas {state}")
+            # Recargamos el menú para ver el cambio de icono
+            await show_feed_options(update, context, fid)
         
     # --- MENÚ DE FEEDS ---
     elif data == "menu_feeds":
