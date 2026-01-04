@@ -12,7 +12,7 @@ from telegram.constants import ParseMode
 from telegram.warnings import PTBUserWarning
 warnings.filterwarnings("ignore", category=PTBUserWarning)
 from core.database import DB
-from core.config import ADMIN_ID
+from core.config import ADMIN_ID, BOT_VERSION
 from utils.logger import LOG_FILE_PATH
 
 # --- ESTADOS DE LA CONVERSACIÓN ---
@@ -74,6 +74,7 @@ async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"———————————————————\n\n"
         
         f"<b>🖥️ ESTADO DEL SISTEMA</b>\n"
+        f"├ <b>Versión:</b> <i>v{BOT_VERSION}</i>\n"
         f"├ <b>Estado:</b> {status_icon}\n"
         f"├ <b>Uptime:</b> <code>{uptime_str}</code>\n"
         f"├ <b>RAM:</b> <code>{mem_usage:.1f} MB</code>\n"

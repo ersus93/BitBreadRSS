@@ -13,7 +13,7 @@ from telegram import ReplyKeyboardMarkup, KeyboardButton, Update, InlineKeyboard
 from telegram.ext import ContextTypes
 from telegram.warnings import PTBUserWarning
 warnings.filterwarnings("ignore", category=PTBUserWarning)
-from core.config import TOKEN, ADMIN_ID
+from core.config import TOKEN, ADMIN_ID, BOT_VERSION
 from services.monitor import RSSMonitor
 from handlers.menus import start, help_command, menu_handler
 from handlers.admin import stats, logs_command, ms_handler
@@ -53,7 +53,7 @@ async def post_init(application):
         msg = (
             f"📰 <b>BitBread Online</b>\n"
             f"————————————————————\n"
-            f"🤖 <b>Versión:</b> Async v1.0\n"
+            f"🤖 <b>Versión:</b> <i>{BOT_VERSION}</i>\n"
             f"🪪 <b>PID:</b> <code>{pid}</code>\n"
             f"🐍 <b>Python:</b> v{py_ver}\n"
         )
